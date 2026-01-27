@@ -1,0 +1,27 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "Express TypeScript server",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.0.6",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^25.0.10",
+    "typescript": "^5.9.3",
+    "tsx": "^4.7.0"
+  }
+}
