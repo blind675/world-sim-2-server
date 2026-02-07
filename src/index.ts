@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import healthCheckRouter from './routes/healthCheck';
 import { getConfig } from './config';
+import { validateApiKey } from './middleware/auth';
 
 dotenv.config();
 
@@ -26,7 +27,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/api', healthCheckRouter);
+app.use('/api/health-check', healthCheckRouter);
+
+app.use(validateApiKey);
+
+// All routes after this point require API key authentication
 
 
 app.listen(PORT, () => {
