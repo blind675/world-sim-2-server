@@ -28,6 +28,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api', healthCheckRouter);
 
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Health check available at http://localhost:${PORT}/api/health-check`);
