@@ -13,4 +13,6 @@ services:
       - "3001:3001"
 
     volumes:
-      - "C:projects/world-sim-data/snapshots:/data/snapshots"
+      - type: bind
+        source: C:\projects\world-sim-data\snapshots
+        target: /data/snapshots
