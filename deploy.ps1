@@ -1,4 +1,8 @@
 $ErrorActionPreference = "Stop"
+
+$log = "C:\projects\world-sim-server\deploy.log"
+Start-Transcript -Path $log -Append
+
 Set-Location "C:\projects\world-sim-server"
 
 # Make sure we're on main
@@ -22,3 +26,5 @@ git pull origin main
 docker compose -f docker-compose.prod.yml up -d --build
 
 Write-Host "Redeploy complete."
+
+Stop-Transcript
