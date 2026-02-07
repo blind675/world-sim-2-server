@@ -1,4 +1,3 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { Request, Response, NextFunction } from 'express';
 import { validateApiKey } from '../src/middleware/auth';
 
