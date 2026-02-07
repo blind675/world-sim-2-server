@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import healthCheckRouter from './routes/healthCheck';
 import { getConfig } from './config';
 import { validateApiKey } from './middleware/auth';
+import { createEngineLoop } from './engine';
 
 dotenv.config();
 
@@ -34,7 +35,16 @@ app.use(validateApiKey);
 // All routes after this point require API key authentication
 
 
+// ── Engine Loop ──────────────────────────────────────────────────────
+const engineLoop = createEngineLoop({
+  dtGameStepSeconds: config.time.dtGameStepSeconds,
+  realStepIntervalSeconds: config.time.realStepIntervalSeconds,
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Health check available at http://localhost:${PORT}/api/health-check`);
+
+  // Auto-start engine loop
+  engineLoop.start();
 });
