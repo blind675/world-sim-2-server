@@ -19,6 +19,7 @@ export const AtmosphereGridConfigSchema = z.object({
 export const LandGridConfigSchema = z.object({
   cellSizeM: z.literal(250).describe('Land cell size in meters (must be 250)'),
   chunkCells: z.literal(256).describe('Chunk size in cells (must be 256x256)'),
+  maxResidentChunks: z.number().int().min(1).default(4096).describe('Max chunks kept in memory before LRU eviction'),
 }).strict();
 
 export const GridsConfigSchema = z.object({
@@ -53,6 +54,10 @@ export interface DerivedConfig {
   landChunkSizeM: number;
   landChunkSizeKm: number;
   acceleration: number;
+  worldChunksX: number;
+  worldChunksY: number;
+  worldCellsX: number;
+  worldCellsY: number;
 }
 
 export interface ValidatedConfig {

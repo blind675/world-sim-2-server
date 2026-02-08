@@ -5,18 +5,34 @@ import { ZodError } from 'zod';
 let cachedConfig: ValidatedConfig | null = null;
 
 function computeDerived(validatedConfig: ReturnType<typeof AppConfigSchema.parse>): DerivedConfig {
-  const { grids, time } = validatedConfig;
+  const { grids, time, planet } = validatedConfig;
+
+  const landChunkSizeM = grids.land.chunkCells * grids.land.cellSizeM;
+
+  // Planet width/height in meters (torus: diameter = 2 * radius)
+  const planetSizeM = planet.radiusKm * 2 * 1000;
+
+  // Snap world cell count to multiples of chunkCells
+  const worldChunksX = Math.round(planetSizeM / landChunkSizeM);
+  const worldChunksY = worldChunksX; // square torus
+  const worldCellsX = worldChunksX * grids.land.chunkCells;
+  const worldCellsY = worldChunksY * grids.land.chunkCells;
 
   return {
     atmosphereCellsTotal: grids.atmosphere.size * grids.atmosphere.size,
 
     landChunkSizeCells: grids.land.chunkCells * grids.land.chunkCells,
 
-    landChunkSizeM: grids.land.chunkCells * grids.land.cellSizeM,
+    landChunkSizeM,
 
-    landChunkSizeKm: (grids.land.chunkCells * grids.land.cellSizeM) / 1000,
+    landChunkSizeKm: landChunkSizeM / 1000,
 
     acceleration: time.dtGameStepSeconds / time.realStepIntervalSeconds,
+
+    worldChunksX,
+    worldChunksY,
+    worldCellsX,
+    worldCellsY,
   };
 }
 

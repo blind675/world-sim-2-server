@@ -4,9 +4,11 @@ import dotenv from 'dotenv';
 import healthCheckRouter from './routes/healthCheck';
 import timeRouter from './routes/time';
 import worldInfoRouter from './routes/worldInfo';
+import landMetricsRouter from './routes/landMetrics';
 import { getConfig } from './config';
 import { validateApiKey } from './middleware/auth';
 import { startEngine } from './engine';
+import { initWorld, logLandMetrics } from './world';
 
 dotenv.config();
 
@@ -37,14 +39,30 @@ app.use(validateApiKey);
 // All routes after this point require API key authentication
 app.use('/api/time', timeRouter);
 app.use('/api/world-info', worldInfoRouter);
+app.use('/api/land-metrics', landMetricsRouter);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Health check available at http://localhost:${PORT}/api/health-check`);
 
+  // Initialize world (terrain generation + chunk manager)
+  const planetSizeM = config.planet.radiusKm * 2 * 1000;
+  initWorld({
+    seed: config.planet.seed,
+    worldWidthM: planetSizeM,
+    worldHeightM: planetSizeM,
+    worldCellsX: config.derived.worldCellsX,
+    worldCellsY: config.derived.worldCellsY,
+    landCellSizeM: config.grids.land.cellSizeM,
+    chunkCells: config.grids.land.chunkCells,
+  });
+
   // Start engine (singleton — restart-only config enforcement)
-  startEngine({
+  const engine = startEngine({
     dtGameStepSeconds: config.time.dtGameStepSeconds,
     realStepIntervalSeconds: config.time.realStepIntervalSeconds,
   });
+
+  // Log land metrics every 10 in-game minutes (600 game-seconds)
+  engine.registerSystem('land-metrics', 600, logLandMetrics);
 });

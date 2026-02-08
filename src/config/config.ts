@@ -26,7 +26,7 @@ export const config: AppConfigInput = {
 
   runtime: {
     logLevel: 'info',
-    
+
     snapshots: {
       enabled: false,
       dir: './snapshots',
