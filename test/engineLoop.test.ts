@@ -14,8 +14,8 @@ const DEFAULT_CONFIG: EngineLoopConfig = {
 // Use fake timers so tests don't wait for real wall-clock delays
 beforeEach(() => {
   jest.useFakeTimers();
-  jest.spyOn(console, 'log').mockImplementation(() => {});
-  jest.spyOn(console, 'error').mockImplementation(() => {});
+  jest.spyOn(console, 'log').mockImplementation(() => { });
+  jest.spyOn(console, 'error').mockImplementation(() => { });
 });
 
 afterEach(() => {
@@ -35,6 +35,7 @@ describe('createEngineLoop', () => {
     const loop = createEngineLoop(DEFAULT_CONFIG, {
       gameTime: { totalMinutes: 1000 },
       stepNumber: 50,
+      accumulators: {},
     });
     expect(loop.getGameTime().totalMinutes).toBe(1000);
     expect(loop.getStepNumber()).toBe(50);
@@ -167,9 +168,9 @@ describe('handler registry', () => {
 
   it('should throw when registering a duplicate handler name', () => {
     const loop = createEngineLoop(DEFAULT_CONFIG);
-    loop.registerHandler('dup', () => {});
+    loop.registerHandler('dup', () => { });
 
-    expect(() => loop.registerHandler('dup', () => {})).toThrow(
+    expect(() => loop.registerHandler('dup', () => { })).toThrow(
       'Handler "dup" is already registered'
     );
   });
@@ -274,6 +275,7 @@ describe('restoreEngineLoop', () => {
     const loop = restoreEngineLoop(DEFAULT_CONFIG, {
       gameTime: { totalMinutes: 500 },
       stepNumber: 500,
+      accumulators: {},
     });
 
     expect(loop.getGameTime().totalMinutes).toBe(500);
@@ -284,6 +286,7 @@ describe('restoreEngineLoop', () => {
     const loop = restoreEngineLoop(DEFAULT_CONFIG, {
       gameTime: { totalMinutes: 100 },
       stepNumber: 100,
+      accumulators: {},
     });
 
     loop.start();
@@ -338,5 +341,244 @@ describe('different configurations', () => {
     expect(loop.getGameTime().totalMinutes).toBe(2);
 
     loop.stop();
+  });
+});
+
+// ── Accumulator Scheduler Tests ─────────────────────────────────────
+
+describe('accumulator scheduler', () => {
+  it('should fire system when accumulator reaches cadence', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const fires: number[] = [];
+
+    // cadence = 300s = 5 minutes. With dtGameStep=60s, fires every 5 ticks.
+    loop.registerSystem('atmo', 300, (ctx) => {
+      fires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 10); // 10 ticks
+    loop.stop();
+
+    // Should fire at tick 5 (acc: 60,120,180,240,300→fire) and tick 10
+    expect(fires).toEqual([5, 10]);
+  });
+
+  it('should not fire system before cadence is reached', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const fires: number[] = [];
+
+    loop.registerSystem('slow', 600, (ctx) => {
+      fires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 9); // 9 ticks = 540s accumulated
+    loop.stop();
+
+    expect(fires).toEqual([]); // 540 < 600, not fired
+  });
+
+  it('should fire system exactly at cadence boundary', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const fires: number[] = [];
+
+    // cadence = 60s = 1 step. Should fire every tick.
+    loop.registerSystem('every-tick', 60, (ctx) => {
+      fires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 3); // 3 ticks
+    loop.stop();
+
+    expect(fires).toEqual([1, 2, 3]);
+  });
+
+  it('should carry over remainder when cadence does not divide evenly', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const fires: number[] = [];
+
+    // cadence = 150s. With dtGameStep=60s:
+    // tick 1: acc=60, tick 2: acc=120, tick 3: acc=180 >= 150 → fire, remainder=30
+    // tick 4: acc=90, tick 5: acc=150 >= 150 → fire, remainder=0
+    // tick 6: acc=60, tick 7: acc=120, tick 8: acc=180 >= 150 → fire, remainder=30
+    loop.registerSystem('odd-cadence', 150, (ctx) => {
+      fires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 8); // 8 ticks
+    loop.stop();
+
+    expect(fires).toEqual([3, 5, 8]);
+  });
+
+  it('should run multiple systems independently', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const fastFires: number[] = [];
+    const slowFires: number[] = [];
+
+    loop.registerSystem('fast', 120, (ctx) => fastFires.push(ctx.stepNumber)); // every 2 ticks
+    loop.registerSystem('slow', 300, (ctx) => slowFires.push(ctx.stepNumber)); // every 5 ticks
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 10); // 10 ticks
+    loop.stop();
+
+    expect(fastFires).toEqual([2, 4, 6, 8, 10]);
+    expect(slowFires).toEqual([5, 10]);
+  });
+
+  it('should throw on invalid cadenceSeconds', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+
+    expect(() => loop.registerSystem('bad', 0, () => { })).toThrow();
+    expect(() => loop.registerSystem('bad', -1, () => { })).toThrow();
+    expect(() => loop.registerSystem('bad', Infinity, () => { })).toThrow();
+    expect(() => loop.registerSystem('bad', NaN, () => { })).toThrow();
+  });
+
+  it('should unregister system via returned function', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const fires: number[] = [];
+
+    const unregister = loop.registerSystem('removable', 120, (ctx) => {
+      fires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 2); // 2 ticks → fires at tick 2
+    expect(fires).toEqual([2]);
+
+    unregister();
+
+    jest.advanceTimersByTime(2000 * 2); // 2 more ticks → would fire at tick 4
+    expect(fires).toEqual([2]); // not called again
+
+    loop.stop();
+  });
+
+  it('should continue running if a system handler throws', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const goodFires: number[] = [];
+
+    loop.registerSystem('bad-sys', 60, () => {
+      throw new Error('system error');
+    });
+    loop.registerSystem('good-sys', 60, (ctx) => {
+      goodFires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 3); // 3 ticks
+    loop.stop();
+
+    expect(goodFires).toEqual([1, 2, 3]);
+    expect(loop.isRunning()).toBe(false); // we stopped it
+    expect(loop.getStepNumber()).toBe(3);
+  });
+
+  it('should run per-tick handlers before cadenced systems', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const order: string[] = [];
+
+    loop.registerHandler('handler', () => order.push('handler'));
+    loop.registerSystem('system', 60, () => order.push('system'));
+
+    loop.start();
+    jest.advanceTimersByTime(2000); // 1 tick
+    loop.stop();
+
+    expect(order).toEqual(['handler', 'system']);
+  });
+});
+
+describe('accumulator serialization', () => {
+  it('should serialize accumulator state', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    loop.registerSystem('atmo', 300, () => { });
+
+    loop.start();
+    jest.advanceTimersByTime(2000 * 3); // 3 ticks = 180s accumulated
+    loop.stop();
+
+    const state = loop.serialize();
+    expect(state.accumulators).toEqual({
+      atmo: { accumulated: 180, cadenceSeconds: 300 },
+    });
+  });
+
+  it('should serialize empty accumulators when no systems registered', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    const state = loop.serialize();
+    expect(state.accumulators).toEqual({});
+  });
+
+  it('should serialize remainder after fire', () => {
+    const loop = createEngineLoop(DEFAULT_CONFIG);
+    loop.registerSystem('atmo', 150, () => { });
+
+    loop.start();
+    // tick 1: 60, tick 2: 120, tick 3: 180 >= 150 → fire, remainder=30
+    jest.advanceTimersByTime(2000 * 3);
+    loop.stop();
+
+    const state = loop.serialize();
+    expect(state.accumulators.atmo.accumulated).toBe(30);
+  });
+
+  it('should restore accumulator state and continue correctly', () => {
+    // Simulate: atmo system with cadence 300s, already accumulated 240s
+    const loop = restoreEngineLoop(DEFAULT_CONFIG, {
+      gameTime: { totalMinutes: 100 },
+      stepNumber: 100,
+      accumulators: {
+        atmo: { accumulated: 240, cadenceSeconds: 300 },
+      },
+    });
+
+    const fires: number[] = [];
+    loop.registerSystem('atmo', 300, (ctx) => {
+      fires.push(ctx.stepNumber);
+    });
+
+    loop.start();
+    // tick 101: acc = 240 + 60 = 300 >= 300 → fire, remainder=0
+    jest.advanceTimersByTime(2000);
+    expect(fires).toEqual([101]);
+
+    loop.stop();
+  });
+
+  it('should roundtrip serialize → restore with accumulators', () => {
+    const original = createEngineLoop(DEFAULT_CONFIG);
+    original.registerSystem('atmo', 300, () => { });
+    original.registerSystem('land', 600, () => { });
+
+    original.start();
+    jest.advanceTimersByTime(2000 * 7); // 7 ticks = 420s
+    original.stop();
+
+    const state = original.serialize();
+    // atmo: 420s → fired at 300, remainder = 120
+    // land: 420s → not fired (< 600)
+    expect(state.accumulators.atmo.accumulated).toBe(120);
+    expect(state.accumulators.land.accumulated).toBe(420);
+
+    const restored = restoreEngineLoop(DEFAULT_CONFIG, state);
+    const atmoFires: number[] = [];
+    const landFires: number[] = [];
+    restored.registerSystem('atmo', 300, (ctx) => atmoFires.push(ctx.stepNumber));
+    restored.registerSystem('land', 600, (ctx) => landFires.push(ctx.stepNumber));
+
+    restored.start();
+    // atmo: starts at 120, needs 180 more = 3 ticks → fires at step 10
+    // land: starts at 420, needs 180 more = 3 ticks → fires at step 10
+    jest.advanceTimersByTime(2000 * 3);
+    restored.stop();
+
+    expect(atmoFires).toEqual([10]);
+    expect(landFires).toEqual([10]);
   });
 });

@@ -36,6 +36,12 @@ export interface StepContext {
  */
 export type StepHandler = (ctx: StepContext) => void;
 
+/**
+ * A system handler is called when its accumulator reaches the cadence threshold.
+ * Receives the same StepContext as regular handlers.
+ */
+export type SystemHandler = (ctx: StepContext) => void;
+
 export interface EngineLoopConfig {
   /** Fixed simulated time per engine step, in seconds (must be 60) */
   dtGameStepSeconds: number;
@@ -43,16 +49,26 @@ export interface EngineLoopConfig {
   realStepIntervalSeconds: number;
 }
 
+export interface AccumulatorState {
+  /** Accumulated game-seconds since last fire */
+  accumulated: number;
+  /** Cadence threshold in game-seconds */
+  cadenceSeconds: number;
+}
+
 export interface EngineLoopState {
   gameTime: GameTimeState;
   stepNumber: number;
+  accumulators: Record<string, AccumulatorState>;
 }
 
 // ── Engine Loop ─────────────────────────────────────────────────────
 
 export interface EngineLoop {
-  /** Register a step handler. Returns an unregister function. */
+  /** Register a step handler (called every tick). Returns an unregister function. */
   registerHandler(name: string, handler: StepHandler): () => void;
+  /** Register a cadenced system. Fires when accumulator >= cadenceSeconds. Returns an unregister function. */
+  registerSystem(name: string, cadenceSeconds: number, handler: SystemHandler): () => void;
   /** Start the loop. No-op if already running. */
   start(): void;
   /** Stop the loop. No-op if not running. */
@@ -83,6 +99,26 @@ export function createEngineLoop(
 
   const handlers: Map<string, StepHandler> = new Map();
 
+  interface SystemEntry {
+    cadenceSeconds: number;
+    accumulated: number;
+    handler: SystemHandler;
+  }
+  const systems: Map<string, SystemEntry> = new Map();
+
+  // Restore accumulator state if provided
+  if (initialState?.accumulators) {
+    for (const [name, acc] of Object.entries(initialState.accumulators)) {
+      // Create placeholder entries — handlers will be re-registered by the caller.
+      // We store cadence and accumulated so they survive restoration.
+      systems.set(name, {
+        cadenceSeconds: acc.cadenceSeconds,
+        accumulated: acc.accumulated,
+        handler: () => { },
+      });
+    }
+  }
+
   function tick(): void {
     const tickStart = performance.now();
 
@@ -96,12 +132,25 @@ export function createEngineLoop(
       dtGameStepSeconds,
     });
 
-    // Run all registered handlers
+    // Run all registered per-tick handlers
     for (const [name, handler] of handlers) {
       try {
         handler(ctx);
       } catch (err) {
         console.error(`[Engine] Handler "${name}" threw on step ${stepNumber}:`, err);
+      }
+    }
+
+    // Run cadenced systems via accumulators
+    for (const [name, entry] of systems) {
+      entry.accumulated += dtGameStepSeconds;
+      if (entry.accumulated >= entry.cadenceSeconds) {
+        entry.accumulated -= entry.cadenceSeconds;
+        try {
+          entry.handler(ctx);
+        } catch (err) {
+          console.error(`[Engine] System "${name}" threw on step ${stepNumber}:`, err);
+        }
       }
     }
 
@@ -130,6 +179,29 @@ export function createEngineLoop(
       };
     },
 
+    registerSystem(name: string, cadenceSeconds: number, handler: SystemHandler): () => void {
+      if (cadenceSeconds <= 0 || !Number.isFinite(cadenceSeconds)) {
+        throw new Error(`cadenceSeconds must be a positive finite number, got ${cadenceSeconds}`);
+      }
+      // If restoring, update the handler on the existing placeholder entry
+      if (systems.has(name)) {
+        const existing = systems.get(name)!;
+        existing.handler = handler;
+        // Keep existing cadence and accumulated from restored state
+        return () => {
+          systems.delete(name);
+        };
+      }
+      systems.set(name, {
+        cadenceSeconds,
+        accumulated: 0,
+        handler,
+      });
+      return () => {
+        systems.delete(name);
+      };
+    },
+
     start(): void {
       if (running) return;
       running = true;
@@ -137,6 +209,12 @@ export function createEngineLoop(
       const acceleration = dtGameStepSeconds / realStepIntervalSeconds;
       console.log(`[Engine] Starting loop: Δt=${dtGameStepSeconds}s, interval=${realStepIntervalSeconds}s, acceleration=${acceleration.toFixed(1)}x`);
       console.log(`[Engine] Registered handlers: ${handlers.size > 0 ? [...handlers.keys()].join(', ') : '(none)'}`);
+      if (systems.size > 0) {
+        const systemInfo = [...systems.entries()]
+          .map(([n, e]) => `${n}(${e.cadenceSeconds}s)`)
+          .join(', ');
+        console.log(`[Engine] Registered systems: ${systemInfo}`);
+      }
 
       // Schedule first tick
       timerId = setTimeout(tick, realStepIntervalMs);
@@ -167,9 +245,17 @@ export function createEngineLoop(
     },
 
     serialize(): EngineLoopState {
+      const accumulators: Record<string, AccumulatorState> = {};
+      for (const [name, entry] of systems) {
+        accumulators[name] = {
+          accumulated: entry.accumulated,
+          cadenceSeconds: entry.cadenceSeconds,
+        };
+      }
       return {
         gameTime: serializeGameTime(gameTime),
         stepNumber,
+        accumulators,
       };
     },
   };
